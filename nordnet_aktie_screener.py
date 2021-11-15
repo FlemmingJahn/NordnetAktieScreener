@@ -51,10 +51,6 @@ def get_ratios_value(info, key, key_min, key_max):
     return get_value(info, 'key_ratios_info', key, key_min, key_max)
 
 
-def get_instrument_info_value(info, key, key_min, key_max):
-    return get_value(info, 'instrument_info', key, key_min, key_max)
-
-
 def print_info(keyInfo, counter):
     for info in keyInfo['results']:
         name = get_name_print(info)
@@ -65,14 +61,18 @@ def print_info(keyInfo, counter):
         if None in (pe, dividend_yield, instrument_pawn_percentage):
             continue
         if "Fund" not in name:
-            print(f'{counter}:{name} - {pe} - {dividend_yield} - {instrument_pawn_percentage} ')
-        counter += 1
+            print("%-4d:%-35s - %-10f - %-15f - %-5d" % (counter, name, pe, dividend_yield, instrument_pawn_percentage))
+            counter += 1
     return counter
 
 
 def loop_over_stocks(counter, exchange_country, country):
     offset = 0
-    print(f"******* {country} *******")
+    print("*" * 100)
+    print(f"* {country}" + " " * (100 - len(country) - 3) + "*")
+    print("*" * 100)
+    print("%-4s %-35s - %-10s - %-15s - %-5s" % ("#", "Firma", "P/E", "Rente", "Belåning"))
+    print("-" * 100)
     while 1:
         url = f'https://www.nordnet.dk/api/2/instrument_search/query/stocklist?apply_filters=exchange_country%3{exchange_country}&sort_order=desc&sort_attribute=dividend_yield&limit=100&offset={offset}'
 
@@ -84,11 +84,15 @@ def loop_over_stocks(counter, exchange_country, country):
         offset = offset + 100
     return counter
 
+
+def get_instrument_info_value(info, key, key_min, key_max):
+    return get_value(info, 'instrument_info', key, key_min, key_max)
+
 counter = loop_over_stocks(counter, 'DDK', "Danmark")
 counter = loop_over_stocks(counter, 'DSE', "Sverige")
-#counter = loop_over_stocks(counter, 'DFI', "Finland")
-#   counter = loop_over_stocks(counter, 'DNO', "Norge")
-#counter = loop_over_stocks(counter, 'DDE', "Tyskland")
+counter = loop_over_stocks(counter, 'DFI', "Finland")
+counter = loop_over_stocks(counter, 'DNO', "Norge")
+counter = loop_over_stocks(counter, 'DDE', "Tyskland")
 counter = loop_over_stocks(counter, 'DUS', "USA")
 counter = loop_over_stocks(counter, 'DCA', "Canada")
 
