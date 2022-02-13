@@ -1,0 +1,15 @@
+{
+    "all_stocks": [
+        {
+            "my_stocks": [
+                "AT&T Inc.",
+                "Swedbank AB"
+            ]
+        },
+        {
+            "exclude_stocks": [
+                "BlackRock Municipal Income Trust II"
+            ]
+        }
+    ]
+}
