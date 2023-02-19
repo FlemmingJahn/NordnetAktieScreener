@@ -3,12 +3,64 @@
         {
             "my_stocks": [
                 "AT&T Inc.",
-                "Swedbank AB"
+                "NCC AB ser. B",
+                "Electrolux, AB ser. B",
+                "Swedbank AB ser A",
+                "Svenska Handelsbanken ser. A",
+                "Altria Group, Inc.",
+                "Nordea Bank Abp",
+                "Peab AB ser. B",
+                "Altria Group",
+                "AT&T",
+                "Volvo, AB ser. B",
+                "SSAB AB ser. B",
+                "Alm. Brand A/S",
+                "Scandinavian Tobacco Group A/S",
+                "Matas A/S",
+                "Danske Bank A/S",
+                "Chr. Hansen Holding A/S",
+                "Skanska AB ser. B",
+                "Clas Ohlson AB ser. B",
+                "STMicroelectronics N.V.",
+                "Warner Bros. Discovery A",
+                "IBM",
+                "Intel",
+                "Jyske Bank A/S",
+                "Jobindex A/S",
+                "HEXPOL AB ser. B",
+                "H. Lundbeck A/S A",
+                "Netflix",
+                "Topdanmark A/S",
+                "Nilfisk Holding A/S",
+                "DFDS A/S",
+                "Lån og Spar Bank A/S",
+                "TORM plc A",
+                "Hennes & Mauritz AB, H & M ser. B",
+                "Nobia AB",
+                "Securitas AB ser. B",
+                "Boliden AB",
+                "Rockwool A/S ser. A",
+                "Rockwool A/S ser. B",
+                "H+H International A/S",
+                "A.P. Møller - Mærsk A A/S",
+                "A.P. Møller - Mærsk B A/S",
+                "Dustin Group AB",
+                "Thule Group AB",
+                "Bilia AB ser. A",
+		        "Tele2 AB ser. B",
+                "Verizon Communications",
+                "3M Co.",
+                "3M",
+                "Walgreens Boots Alliance"
+
+
             ]
         },
         {
             "exclude_stocks": [
-                "BlackRock Municipal Income Trust II"
+                "BlackRock Municipal Income Trust II",
+                "Volvo, AB ser. A",
+                "SSAB AB ser. A"
             ]
         }
     ]
