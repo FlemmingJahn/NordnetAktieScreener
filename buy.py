@@ -1,6 +1,6 @@
 import shared
 
-shared.options.instrument_pawn_percentage_min = 75
+shared.options.instrument_pawn_percentage_min = 80
 shared.options.instrument_pawn_percentage_max = 100
 shared.options.pe_min = 1
 shared.options.pe_max = 15
@@ -65,6 +65,7 @@ screener = shared.Nordnet_screener()
 counter = loop_over_stocks(counter, 'DDK', "Danmark")
 counter = loop_over_stocks(counter, 'DSE', "Sverige")
 counter = loop_over_stocks(counter, 'DFI', "Finland")
+counter = loop_over_stocks(counter, 'DGP', "England")
 #counter = loop_over_stocks(counter, 'DNO', "Norge")
 #counter = loop_over_stocks(counter, 'DDE', "Tyskland")
 counter = loop_over_stocks(counter, 'DUS', "USA")
