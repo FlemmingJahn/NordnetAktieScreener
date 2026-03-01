@@ -33,60 +33,41 @@ def load_exclude_list():
         return {"all_stocks": [{"my_stocks": []}, {"exclude_stocks": []}]}
 
 
-def get_session_cookies():
-    """Fetch cookies from the Nordnet landing page."""
-    r = requests.get("https://www.nordnet.dk/markedet", headers={"User-Agent": UA}, timeout=15)
-    return {c.name: c.value for c in r.cookies}
+def save_exclude_list(data: dict):
+    with open(EXCLUDE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 
 def login(session: requests.Session, username: str, password: str) -> bool:
-    """
-    Attempt to log in via Nordnet's API.
-    Returns True on success, False otherwise.
-    """
-    # First visit landing page to pick up CSRF / session cookies
     session.get("https://www.nordnet.dk/markedet", headers={"User-Agent": UA}, timeout=15)
-
     login_url = "https://www.nordnet.dk/api/2/authentication/basic/login"
     payload = {"username": username, "password": password}
-    headers = {
-        "User-Agent": UA,
-        "client-id": "NEXT",
-        "Content-Type": "application/json",
-    }
+    headers = {"User-Agent": UA, "client-id": "NEXT", "Content-Type": "application/json"}
     r = session.post(login_url, json=payload, headers=headers, timeout=15)
     return r.status_code == 200
 
 
-def fetch_stocks(cookies: dict, exchange_country: str,
-                 headers: dict, log_fn) -> list:
-    """Download all stocks for a given exchange country."""
-    # Note: %3 (not %3A) matches the working original script's URL format
+def fetch_stocks(session: requests.Session, exchange_country: str, headers: dict, log_fn) -> list:
     url = (f"https://www.nordnet.dk/api/2/instrument_search/query/stocklist"
            f"?apply_filters=exchange_country%3{exchange_country}"
            f"&sort_order=desc&sort_attribute=dividend_yield&limit=100&offset=0")
-    r = requests.get(url, cookies=cookies, headers=headers, timeout=15)
+    r = session.get(url, headers=headers, timeout=15)
     if r.status_code != 200:
         log_fn(f"  [!] HTTP {r.status_code} for {exchange_country}")
         return []
-
     data = r.json()
     total = data.get("total_hits", 0)
     results = list(data.get("results", []))
-
     offset = 100
-    batch = 100
     while offset < total:
         url = (f"https://www.nordnet.dk/api/2/instrument_search/query/stocklist"
                f"?apply_filters=exchange_country%3{exchange_country}"
-               f"&sort_order=desc&sort_attribute=dividend_yield"
-               f"&limit={batch}&offset={offset}")
-        r = requests.get(url, cookies=cookies, headers=headers, timeout=15)
+               f"&sort_order=desc&sort_attribute=dividend_yield&limit=100&offset={offset}")
+        r = session.get(url, headers=headers, timeout=15)
         if r.status_code != 200:
             break
         results += r.json().get("results", [])
-        offset += batch
-
+        offset += 100
     return results
 
 
@@ -109,6 +90,7 @@ class App(tk.Tk):
         self.exclude_list = load_exclude_list()
         self._running = False
         self._thread = None
+        self._session = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -116,8 +98,23 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── top frame: login + filters ──────────────────────────────────
-        top = ttk.Frame(self, padding=10)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        # Tab 1 – Screening
+        screening_tab = ttk.Frame(self.notebook)
+        self.notebook.add(screening_tab, text="  Screening  ")
+        self._build_screening_tab(screening_tab)
+
+        # Tab 2 – Ekskluderingsliste
+        exclude_tab = ttk.Frame(self.notebook)
+        self.notebook.add(exclude_tab, text="  Ekskluderingsliste  ")
+        self._build_exclude_tab(exclude_tab)
+
+    # ── Tab 1: Screening ───────────────────────────────────────────────
+
+    def _build_screening_tab(self, parent):
+        top = ttk.Frame(parent, padding=10)
         top.pack(fill=tk.X)
 
         # Login section
@@ -137,12 +134,12 @@ class App(tk.Tk):
         filter_frame.grid(row=0, column=1, padx=4, pady=4, sticky="nw")
 
         filters = [
-            ("P/E min:",          "pe_min",                    "1"),
-            ("P/E max:",          "pe_max",                    "20"),
-            ("Direkte Rente min %:", "dividend_yield_min",     "1"),
-            ("Direkte Rente max %:", "dividend_yield_max",     "100"),
-            ("Belåning min %:",   "instrument_pawn_percentage_min", "65"),
-            ("Belåning max %:",   "instrument_pawn_percentage_max", "101"),
+            ("P/E min:",              "pe_min",                         "1"),
+            ("P/E max:",              "pe_max",                         "20"),
+            ("Direkte Rente min %:",  "dividend_yield_min",             "1"),
+            ("Direkte Rente max %:",  "dividend_yield_max",             "100"),
+            ("Belåning min %:",       "instrument_pawn_percentage_min", "65"),
+            ("Belåning max %:",       "instrument_pawn_percentage_max", "101"),
         ]
         self.filter_vars = {}
         for i, (label, key, default) in enumerate(filters):
@@ -162,8 +159,8 @@ class App(tk.Tk):
             self.country_vars[code] = var
             ttk.Checkbutton(country_frame, text=name, variable=var).grid(row=i, column=0, sticky="w")
 
-        # ── button row ───────────────────────────────────────────────────
-        btn_frame = ttk.Frame(self, padding=(10, 0, 10, 6))
+        # Button row
+        btn_frame = ttk.Frame(parent, padding=(10, 0, 10, 6))
         btn_frame.pack(fill=tk.X)
 
         self.run_btn = ttk.Button(btn_frame, text="▶  Kør screening", command=self._start)
@@ -175,8 +172,8 @@ class App(tk.Tk):
         self.status_var = tk.StringVar(value="Klar.")
         ttk.Label(btn_frame, textvariable=self.status_var, foreground="gray").pack(side=tk.LEFT, padx=12)
 
-        # ── results table ────────────────────────────────────────────────
-        table_frame = ttk.Frame(self, padding=(10, 0, 10, 4))
+        # Results table
+        table_frame = ttk.Frame(parent, padding=(10, 0, 10, 4))
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         cols = ("#", "Firma", "Marked", "P/E", "Direkte Rente %", "Belåning %")
@@ -192,17 +189,159 @@ class App(tk.Tk):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # alternating row colours
         self.tree.tag_configure("odd",  background="#f5f5f5")
         self.tree.tag_configure("even", background="#ffffff")
 
-        # ── log area ─────────────────────────────────────────────────────
-        log_frame = ttk.LabelFrame(self, text="Log", padding=6)
+        # Right-click context menu to add selected stock to an exclude list
+        self._ctx_menu = tk.Menu(self, tearoff=0)
+        self._ctx_menu.add_command(label="➕ Tilføj til 'Mine beholdninger'",
+                                   command=lambda: self._add_selected_to_exclude("my_stocks"))
+        self._ctx_menu.add_command(label="➕ Tilføj til 'Ekskluderede aktier'",
+                                   command=lambda: self._add_selected_to_exclude("exclude_stocks"))
+        self.tree.bind("<Button-3>", self._show_ctx_menu)
+
+        # Log area
+        log_frame = ttk.LabelFrame(parent, text="Log", padding=6)
         log_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         self.log_box = scrolledtext.ScrolledText(log_frame, height=5, state=tk.DISABLED,
                                                  font=("Consolas", 9))
         self.log_box.pack(fill=tk.X)
+
+    # ── Tab 2: Exclude list editor ─────────────────────────────────────
+
+    def _build_exclude_tab(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.columnconfigure(1, weight=1)
+        parent.rowconfigure(0, weight=1)
+
+        # ── Left panel: Mine beholdninger ──
+        left = ttk.LabelFrame(parent, text="Mine beholdninger (altid ekskluderet)", padding=8)
+        left.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        left.rowconfigure(0, weight=1)
+        left.columnconfigure(0, weight=1)
+
+        self.my_stocks_lb = tk.Listbox(left, selectmode=tk.EXTENDED, font=("Segoe UI", 9))
+        vsb_my = ttk.Scrollbar(left, orient=tk.VERTICAL, command=self.my_stocks_lb.yview)
+        self.my_stocks_lb.configure(yscrollcommand=vsb_my.set)
+        self.my_stocks_lb.grid(row=0, column=0, sticky="nsew")
+        vsb_my.grid(row=0, column=1, sticky="ns")
+
+        my_btn = ttk.Frame(left)
+        my_btn.grid(row=1, column=0, columnspan=2, pady=(6, 0), sticky="ew")
+        self.my_entry = ttk.Entry(my_btn)
+        self.my_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        self.my_entry.bind("<Return>", lambda e: self._add_entry(self.my_entry, self.my_stocks_lb))
+        ttk.Button(my_btn, text="Tilføj",
+                   command=lambda: self._add_entry(self.my_entry, self.my_stocks_lb)).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(my_btn, text="Fjern valgte",
+                   command=lambda: self._remove_selected(self.my_stocks_lb)).pack(side=tk.LEFT)
+
+        # ── Right panel: Ekskluderede aktier ──
+        right = ttk.LabelFrame(parent, text="Ekskluderede aktier", padding=8)
+        right.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
+        right.rowconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+
+        self.excl_stocks_lb = tk.Listbox(right, selectmode=tk.EXTENDED, font=("Segoe UI", 9))
+        vsb_ex = ttk.Scrollbar(right, orient=tk.VERTICAL, command=self.excl_stocks_lb.yview)
+        self.excl_stocks_lb.configure(yscrollcommand=vsb_ex.set)
+        self.excl_stocks_lb.grid(row=0, column=0, sticky="nsew")
+        vsb_ex.grid(row=0, column=1, sticky="ns")
+
+        ex_btn = ttk.Frame(right)
+        ex_btn.grid(row=1, column=0, columnspan=2, pady=(6, 0), sticky="ew")
+        self.excl_entry = ttk.Entry(ex_btn)
+        self.excl_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        self.excl_entry.bind("<Return>", lambda e: self._add_entry(self.excl_entry, self.excl_stocks_lb))
+        ttk.Button(ex_btn, text="Tilføj",
+                   command=lambda: self._add_entry(self.excl_entry, self.excl_stocks_lb)).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(ex_btn, text="Fjern valgte",
+                   command=lambda: self._remove_selected(self.excl_stocks_lb)).pack(side=tk.LEFT)
+
+        # ── Save button ──
+        save_frame = ttk.Frame(parent, padding=(10, 0, 10, 10))
+        save_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        ttk.Button(save_frame, text="💾  Gem ekskluderingsliste",
+                   command=self._save_exclude_list).pack(side=tk.LEFT)
+        self.excl_status_var = tk.StringVar()
+        ttk.Label(save_frame, textvariable=self.excl_status_var, foreground="gray").pack(side=tk.LEFT, padx=10)
+
+        # Populate listboxes from loaded data
+        self._populate_exclude_listboxes()
+
+    # ------------------------------------------------------------------
+    # Exclude list helpers
+    # ------------------------------------------------------------------
+
+    def _populate_exclude_listboxes(self):
+        self.my_stocks_lb.delete(0, tk.END)
+        self.excl_stocks_lb.delete(0, tk.END)
+        try:
+            for name in sorted(self.exclude_list["all_stocks"][0]["my_stocks"]):
+                self.my_stocks_lb.insert(tk.END, name)
+            for name in sorted(self.exclude_list["all_stocks"][1]["exclude_stocks"]):
+                self.excl_stocks_lb.insert(tk.END, name)
+        except Exception:
+            pass
+
+    def _add_entry(self, entry: ttk.Entry, listbox: tk.Listbox):
+        value = entry.get().strip()
+        if not value:
+            return
+        existing = list(listbox.get(0, tk.END))
+        if value not in existing:
+            listbox.insert(tk.END, value)
+            items = sorted(listbox.get(0, tk.END))
+            listbox.delete(0, tk.END)
+            for item in items:
+                listbox.insert(tk.END, item)
+        entry.delete(0, tk.END)
+
+    def _remove_selected(self, listbox: tk.Listbox):
+        for idx in reversed(listbox.curselection()):
+            listbox.delete(idx)
+
+    def _save_exclude_list(self):
+        my_stocks    = list(self.my_stocks_lb.get(0, tk.END))
+        excl_stocks  = list(self.excl_stocks_lb.get(0, tk.END))
+        self.exclude_list = {
+            "all_stocks": [
+                {"my_stocks": my_stocks},
+                {"exclude_stocks": excl_stocks},
+            ]
+        }
+        try:
+            save_exclude_list(self.exclude_list)
+            self.excl_status_var.set("Gemt ✓")
+            self.after(3000, lambda: self.excl_status_var.set(""))
+        except Exception as e:
+            messagebox.showerror("Fejl", f"Kunne ikke gemme filen:\n{e}")
+
+    def _show_ctx_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if row:
+            self.tree.selection_set(row)
+            self._ctx_menu.tk_popup(event.x_root, event.y_root)
+
+    def _add_selected_to_exclude(self, list_key: str):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        name = self.tree.set(sel[0], "Firma")
+        if list_key == "my_stocks":
+            lb = self.my_stocks_lb
+        else:
+            lb = self.excl_stocks_lb
+        if name not in lb.get(0, tk.END):
+            lb.insert(tk.END, name)
+            items = sorted(lb.get(0, tk.END))
+            lb.delete(0, tk.END)
+            for item in items:
+                lb.insert(tk.END, item)
+        # Switch to exclude tab so user can see it was added
+        self.notebook.select(1)
+        self._save_exclude_list()
 
     # ------------------------------------------------------------------
     # Sorting
@@ -238,11 +377,14 @@ class App(tk.Tk):
     def _start(self):
         if self._running:
             return
+        # Reload exclude list from disk (picks up any saves)
+        self.exclude_list = load_exclude_list()
+        self._populate_exclude_listboxes()
+
         self._running = True
         self.run_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
 
-        # clear previous results
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.log_box.configure(state=tk.NORMAL)
@@ -254,6 +396,8 @@ class App(tk.Tk):
 
     def _stop(self):
         self._running = False
+        if self._session:
+            self._session.close()
         self._set_status("Stopper…")
 
     def _finish(self):
@@ -270,13 +414,12 @@ class App(tk.Tk):
             self.after(0, self._set_status, "Forbinder til Nordnet…")
             self.after(0, self._log, "Henter session cookies…")
 
-            # Fetch cookies exactly like the working original script
-            r0 = requests.get(
-                "https://www.nordnet.dk/markedet",
-                headers={"User-Agent": UA},
-                timeout=15,
-            )
+            self._session = requests.Session()
+            self._session.headers.update({"User-Agent": UA})
+
+            r0 = self._session.get("https://www.nordnet.dk/markedet", timeout=15)
             cookies = {c.name: c.value for c in r0.cookies}
+            self._session.cookies.update(cookies)
             self.after(0, self._log, f"Cookies modtaget: {list(cookies.keys())}")
 
             username = self.username_var.get().strip()
@@ -284,11 +427,8 @@ class App(tk.Tk):
 
             if username and password:
                 self.after(0, self._log, f"Logger ind som {username}…")
-                session = requests.Session()
-                session.cookies.update(cookies)
-                ok = login(session, username, password)
+                ok = login(self._session, username, password)
                 if ok:
-                    cookies = {c.name: c.value for c in session.cookies}
                     self.after(0, self._log, "Login lykkedes ✓")
                 else:
                     self.after(0, self._log, "Login mislykkedes — fortsætter uden login.")
@@ -297,19 +437,18 @@ class App(tk.Tk):
 
             api_headers = {"client-id": "NEXT"}
 
-            # Read filter values
             def fval(key, default):
                 try:
                     return float(self.filter_vars[key].get())
                 except ValueError:
                     return default
 
-            pe_min    = fval("pe_min", 1)
-            pe_max    = fval("pe_max", 20)
-            dy_min    = fval("dividend_yield_min", 1)
-            dy_max    = fval("dividend_yield_max", 100)
-            bp_min    = fval("instrument_pawn_percentage_min", 65)
-            bp_max    = fval("instrument_pawn_percentage_max", 101)
+            pe_min = fval("pe_min", 1)
+            pe_max = fval("pe_max", 20)
+            dy_min = fval("dividend_yield_min", 1)
+            dy_max = fval("dividend_yield_max", 100)
+            bp_min = fval("instrument_pawn_percentage_min", 65)
+            bp_max = fval("instrument_pawn_percentage_max", 101)
 
             selected_countries = [(name, code) for name, code in COUNTRIES
                                   if self.country_vars[code].get()]
@@ -319,6 +458,12 @@ class App(tk.Tk):
                 self.after(0, self._finish)
                 return
 
+            try:
+                my_stocks   = set(self.exclude_list["all_stocks"][0]["my_stocks"])
+                excl_stocks = set(self.exclude_list["all_stocks"][1]["exclude_stocks"])
+            except Exception:
+                my_stocks = excl_stocks = set()
+
             row_count = 0
 
             for country_name, code in selected_countries:
@@ -327,8 +472,8 @@ class App(tk.Tk):
                 self.after(0, self._set_status, f"Henter {country_name}…")
                 self.after(0, self._log, f"→ {country_name} ({code})")
 
-                stocks = fetch_stocks(cookies, code, api_headers, lambda m: self.after(0, self._log, m))
-
+                stocks = fetch_stocks(self._session, code, api_headers,
+                                      lambda m: self.after(0, self._log, m))
                 self.after(0, self._log, f"  {len(stocks)} aktier hentet.")
 
                 for info in stocks:
@@ -338,30 +483,22 @@ class App(tk.Tk):
                     name = get_value(info, "instrument_info", "name")
                     if name is None:
                         continue
-
-                    # Exclude lists
-                    try:
-                        if name in self.exclude_list["all_stocks"][0]["my_stocks"]:
-                            continue
-                        if name in self.exclude_list["all_stocks"][1]["exclude_stocks"]:
-                            continue
-                    except Exception:
-                        pass
-
-                    if name and "Fund" in name:
+                    if name in my_stocks or name in excl_stocks:
+                        continue
+                    if "Fund" in name:
                         continue
 
-                    pe   = get_value(info, "key_ratios_info", "pe")
-                    dy   = get_value(info, "key_ratios_info", "dividend_yield")
-                    bp   = get_value(info, "instrument_info", "instrument_pawn_percentage")
+                    pe = get_value(info, "key_ratios_info", "pe")
+                    dy = get_value(info, "key_ratios_info", "dividend_yield")
+                    bp = get_value(info, "instrument_info", "instrument_pawn_percentage")
 
                     if pe is None or dy is None or bp is None:
                         continue
 
                     try:
-                        pe_f  = float(pe)
-                        dy_f  = float(dy)
-                        bp_f  = float(bp)
+                        pe_f = float(pe)
+                        dy_f = float(dy)
+                        bp_f = float(bp)
                     except (TypeError, ValueError):
                         continue
 
@@ -382,11 +519,19 @@ class App(tk.Tk):
             self.after(0, self._set_status, msg)
             self.after(0, self._log, msg)
 
+        except requests.exceptions.ConnectionError:
+            # Session was closed by _stop() — treat as a clean stop
+            self.after(0, self._set_status, "Stoppet.")
+            self.after(0, self._log, "Stoppet.")
         except Exception as e:
-            self.after(0, self._log, f"Fejl: {e}")
-            self.after(0, self._set_status, "Fejl — se log.")
-
+            if self._running:
+                self.after(0, self._log, f"Fejl: {e}")
+                self.after(0, self._set_status, "Fejl — se log.")
+            else:
+                self.after(0, self._set_status, "Stoppet.")
+                self.after(0, self._log, "Stoppet.")
         finally:
+            self._session = None
             self.after(0, self._finish)
 
 
