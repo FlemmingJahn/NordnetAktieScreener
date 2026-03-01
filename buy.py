@@ -1,6 +1,6 @@
 import shared
 
-shared.options.instrument_pawn_percentage_min = 80
+shared.options.instrument_pawn_percentage_min = 70
 shared.options.instrument_pawn_percentage_max = 100
 shared.options.pe_min = 1
 shared.options.pe_max = 15

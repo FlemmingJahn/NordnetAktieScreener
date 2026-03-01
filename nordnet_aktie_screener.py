@@ -41,8 +41,11 @@ class Nordnet_screener():
 
 cookies = {}
 url = 'https://www.nordnet.dk/markedet'
-r = requests.get(url)
-cookies['NEXT'] = r.cookies['NEXT']
+r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'})
+# Copy all cookies returned by Nordnet (the 'NEXT' cookie no longer exists; pass whatever is returned)
+for cookie in r.cookies:
+    cookies[cookie.name] = cookie.value
+# 'client-id: NEXT' is a fixed API identifier header, not the cookie value
 headers = {'client-id': 'NEXT'}
 
 url = 'https://www.nordnet.dk/api/2/instrument_search/query/stocklist?sort_order=desc&sort_attribute=dividend_yield&limit=100&offset=100'

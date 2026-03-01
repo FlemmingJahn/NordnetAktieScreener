@@ -24,7 +24,7 @@ class Nordnet_screener():
         r = requests.get(url)
 
         self.cookies = {}
-        self.cookies['NEXT'] = r.cookies['NEXT']
+     #   self.cookies['NEXT'] = r.cookies['NEXT']
         self.headers = {'client-id': 'NEXT'}
 
     def __init__(self):
