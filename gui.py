@@ -148,9 +148,16 @@ class App(tk.Tk):
             self.filter_vars[key] = var
             ttk.Entry(filter_frame, textvariable=var, width=8).grid(row=i, column=1, padx=6, pady=1)
 
+        # Køb / Salg selector
+        mode_frame = ttk.LabelFrame(top, text="Tilstand", padding=8)
+        mode_frame.grid(row=0, column=2, padx=4, pady=4, sticky="nw")
+        self.mode_var = tk.StringVar(value="køb")
+        ttk.Radiobutton(mode_frame, text="Køb",  variable=self.mode_var, value="køb").grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(mode_frame, text="Salg", variable=self.mode_var, value="salg").grid(row=1, column=0, sticky="w", pady=(4, 0))
+
         # Country checkboxes
         country_frame = ttk.LabelFrame(top, text="Markeder", padding=8)
-        country_frame.grid(row=0, column=2, padx=4, pady=4, sticky="nw")
+        country_frame.grid(row=0, column=3, padx=4, pady=4, sticky="nw")
 
         self.country_vars = {}
         default_on = {"DDK", "DSE", "DFI", "DUS", "DCA"}
@@ -192,12 +199,15 @@ class App(tk.Tk):
         self.tree.tag_configure("odd",  background="#f5f5f5")
         self.tree.tag_configure("even", background="#ffffff")
 
-        # Right-click context menu to add selected stock to an exclude list
+        # Right-click context menu
         self._ctx_menu = tk.Menu(self, tearoff=0)
         self._ctx_menu.add_command(label="➕ Tilføj til 'Mine beholdninger'",
                                    command=lambda: self._add_selected_to_exclude("my_stocks"))
         self._ctx_menu.add_command(label="➕ Tilføj til 'Ekskluderede aktier'",
                                    command=lambda: self._add_selected_to_exclude("exclude_stocks"))
+        self._ctx_menu.add_separator()
+        self._ctx_menu.add_command(label="➖ Fjern fra 'Mine beholdninger'",
+                                   command=self._remove_selected_from_my_stocks)
         self.tree.bind("<Button-3>", self._show_ctx_menu)
 
         # Log area
@@ -329,18 +339,26 @@ class App(tk.Tk):
         if not sel:
             return
         name = self.tree.set(sel[0], "Firma")
-        if list_key == "my_stocks":
-            lb = self.my_stocks_lb
-        else:
-            lb = self.excl_stocks_lb
+        lb = self.my_stocks_lb if list_key == "my_stocks" else self.excl_stocks_lb
         if name not in lb.get(0, tk.END):
             lb.insert(tk.END, name)
             items = sorted(lb.get(0, tk.END))
             lb.delete(0, tk.END)
             for item in items:
                 lb.insert(tk.END, item)
-        # Switch to exclude tab so user can see it was added
         self.notebook.select(1)
+        self._save_exclude_list()
+
+    def _remove_selected_from_my_stocks(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        name = self.tree.set(sel[0], "Firma")
+        items = list(self.my_stocks_lb.get(0, tk.END))
+        if name not in items:
+            messagebox.showinfo("Ikke fundet", f"'{name}' findes ikke i 'Mine beholdninger'.")
+            return
+        self.my_stocks_lb.delete(items.index(name))
         self._save_exclude_list()
 
     # ------------------------------------------------------------------
@@ -464,6 +482,7 @@ class App(tk.Tk):
             except Exception:
                 my_stocks = excl_stocks = set()
 
+            mode = self.mode_var.get()  # "køb" or "salg"
             row_count = 0
 
             for country_name, code in selected_countries:
@@ -483,31 +502,46 @@ class App(tk.Tk):
                     name = get_value(info, "instrument_info", "name")
                     if name is None:
                         continue
-                    if name in my_stocks or name in excl_stocks:
-                        continue
-                    if "Fund" in name:
-                        continue
+
+                    if mode == "køb":
+                        # Buy: skip owned/excluded stocks and funds
+                        if name in my_stocks or name in excl_stocks:
+                            continue
+                        if "Fund" in name:
+                            continue
+                    else:
+                        # Sell: only consider stocks we already own
+                        if name not in my_stocks:
+                            continue
 
                     pe = get_value(info, "key_ratios_info", "pe")
                     dy = get_value(info, "key_ratios_info", "dividend_yield")
                     bp = get_value(info, "instrument_info", "instrument_pawn_percentage")
 
-                    if pe is None or dy is None or bp is None:
-                        continue
-
                     try:
-                        pe_f = float(pe)
-                        dy_f = float(dy)
-                        bp_f = float(bp)
+                        pe_f = float(pe) if pe is not None else 0.0
+                        dy_f = float(dy) if dy is not None else 0.0
+                        bp_f = float(bp) if bp is not None else 0.0
                     except (TypeError, ValueError):
                         continue
 
-                    if not (pe_min < pe_f < pe_max):
-                        continue
-                    if not (dy_min < dy_f < dy_max):
-                        continue
-                    if not (bp_min < bp_f < bp_max):
-                        continue
+                    if mode == "køb":
+                        # All three criteria must be met (AND)
+                        if not (pe_min < pe_f < pe_max):
+                            continue
+                        if not (dy_min < dy_f < dy_max):
+                            continue
+                        if not (bp_min < bp_f < bp_max):
+                            continue
+                    else:
+                        # Sell: show if ANY value falls OUTSIDE its range (OR)
+                        sell = (
+                            not (pe_min < pe_f < pe_max) or
+                            not (dy_min < dy_f < dy_max) or
+                            not (bp_min < bp_f < bp_max)
+                        )
+                        if not sell:
+                            continue
 
                     row_count += 1
                     tag = "even" if row_count % 2 == 0 else "odd"
